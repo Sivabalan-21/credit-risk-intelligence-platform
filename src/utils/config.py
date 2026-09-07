@@ -19,7 +19,7 @@ RAW_TRAIN_FILE = DATA_DIR / os.getenv("RAW_TRAIN_FILENAME", "application_train.c
 RAW_TEST_FILE = DATA_DIR / os.getenv("RAW_TEST_FILENAME", "application_test.csv")
 SQLITE_DB_PATH = DATA_DIR / os.getenv("SQLITE_DB_NAME", "credit_risk.db")
 
-DATASET_URL = os.getenv("DATASET_URL", "https://github.com/Sivabalan-21/credit-risk-intelligence-platform/releases/download/v1.0-data/application_train.csv")
+DATASET_URL = os.getenv("DATASET_URL", "")
 
 MODEL_ARTIFACT_PATH = MODELS_DIR / "lgbm_credit_risk.pkl"
 PREPROCESSOR_ARTIFACT_PATH = MODELS_DIR / "preprocessor.pkl"
