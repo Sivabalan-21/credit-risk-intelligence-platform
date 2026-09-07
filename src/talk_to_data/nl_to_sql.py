@@ -17,6 +17,7 @@ Hallucination control:
 """
 
 import re
+import time
 from dataclasses import dataclass, field
 
 import pandas as pd
@@ -59,6 +60,43 @@ MAX_MEMORY_TURNS = 4
 # ============================================================================
 
 def _call_llm(
+    system_prompt: str,
+    messages: list,
+    max_tokens: int = LLM_MAX_TOKENS,
+    max_retries: int = 3,
+) -> str:
+    """
+    Retries _call_llm_once on transient provider errors (rate limits,
+    "high demand"/overloaded, timeouts) with exponential backoff, since
+    these are usually gone within a few seconds. Non-transient errors
+    (bad/missing API key, invalid request) are raised immediately.
+    """
+    last_exc = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            return _call_llm_once(system_prompt, messages, max_tokens)
+        except Exception as e:
+            last_exc = e
+            msg = str(e).lower()
+            transient = any(
+                token in msg
+                for token in (
+                    "503", "429", "overloaded", "unavailable",
+                    "high demand", "rate limit", "timeout", "resource_exhausted",
+                )
+            )
+            if not transient or attempt == max_retries:
+                raise
+            wait_s = 2 ** attempt  # 2s, 4s, 8s
+            logger.warning(
+                "LLM call failed (attempt %d/%d), retrying in %ds: %s",
+                attempt, max_retries, wait_s, e,
+            )
+            time.sleep(wait_s)
+    raise last_exc  # pragma: no cover — unreachable, keeps type checkers happy
+
+
+def _call_llm_once(
     system_prompt: str,
     messages: list,
     max_tokens: int = LLM_MAX_TOKENS,
@@ -390,11 +428,27 @@ class TalkToDataSession:
         # STEP 2 — Generate SQL
         # ====================================================================
 
-        raw_sql = _call_llm(
-            SQL_SYSTEM_PROMPT,
-            sql_messages,
-            max_tokens=400,
-        )
+        try:
+            raw_sql = _call_llm(
+                SQL_SYSTEM_PROMPT,
+                sql_messages,
+                max_tokens=400,
+            )
+        except Exception as e:
+            logger.exception("LLM call failed while generating SQL")
+            answer = (
+                "I couldn't reach the AI model just now (it may be "
+                "temporarily overloaded). Please try asking again in "
+                "a moment."
+            )
+            self.history.append(ChatTurn(question, None, answer))
+            return {
+                "question": question,
+                "sql": None,
+                "dataframe": None,
+                "answer": answer,
+                "error": str(e),
+            }
 
         sql = _extract_sql(
             raw_sql
@@ -519,11 +573,28 @@ class TalkToDataSession:
             result_preview,
         )
 
-        answer = _call_llm(
-    ANSWER_SYSTEM_PROMPT,
-    answer_messages,
-    max_tokens=1024
-)
+        try:
+            answer = _call_llm(
+                ANSWER_SYSTEM_PROMPT,
+                answer_messages,
+                max_tokens=1024,
+            )
+        except Exception as e:
+            logger.exception("LLM call failed while generating the answer")
+            answer = (
+                "I ran the query successfully, but couldn't reach the AI "
+                "model to summarize the result (it may be temporarily "
+                "overloaded). Here's the raw result data instead — please "
+                "try asking again in a moment for a written answer."
+            )
+            self.history.append(ChatTurn(question, sql, answer))
+            return {
+                "question": question,
+                "sql": sql,
+                "dataframe": df,
+                "answer": answer,
+                "error": str(e),
+            }
 
         # ====================================================================
         # STEP 7 — Save conversation
