@@ -57,7 +57,12 @@ def train_model(df=None) -> dict:
         colsample_bytree=0.8,
         scale_pos_weight=scale_pos_weight,
         random_state=RANDOM_STATE,
-        n_jobs=-1,
+        # n_jobs=-1 detects the HOST's core count, not the container's
+        # actual CPU quota — on constrained/shared hosting (e.g. Streamlit
+        # Community Cloud, especially under a CPU throttle) that oversubscribes
+        # threads and causes severe contention, making training look "stuck"
+        # rather than actually failing. A small fixed value avoids that.
+        n_jobs=2,
         verbosity=-1,
     )
 
