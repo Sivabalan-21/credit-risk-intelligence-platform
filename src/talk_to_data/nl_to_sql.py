@@ -63,13 +63,14 @@ def _call_llm(
     system_prompt: str,
     messages: list,
     max_tokens: int = LLM_MAX_TOKENS,
-    max_retries: int = 3,
+    max_retries: int = 5,
 ) -> str:
     """
     Retries _call_llm_once on transient provider errors (rate limits,
-    "high demand"/overloaded, timeouts) with exponential backoff, since
-    these are usually gone within a few seconds. Non-transient errors
-    (bad/missing API key, invalid request) are raised immediately.
+    "high demand"/overloaded, timeouts) with capped exponential backoff,
+    since these are usually gone within tens of seconds. Non-transient
+    errors (bad/missing API key, invalid request, 404 model-not-found)
+    are raised immediately without retrying.
     """
     last_exc = None
     for attempt in range(1, max_retries + 1):
@@ -87,7 +88,7 @@ def _call_llm(
             )
             if not transient or attempt == max_retries:
                 raise
-            wait_s = 2 ** attempt  # 2s, 4s, 8s
+            wait_s = min(2 ** attempt, 15)  # 2s, 4s, 8s, 15s, 15s (~44s total)
             logger.warning(
                 "LLM call failed (attempt %d/%d), retrying in %ds: %s",
                 attempt, max_retries, wait_s, e,
