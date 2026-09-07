@@ -243,7 +243,7 @@ with tabs[2]:
         st.write(f"Base rate (average model output before this applicant's features): `{explanation['base_value']:.3f}`")
         exp_df = pd.DataFrame(explanation["top_features"])
         exp_df["shap_value"] = exp_df["shap_value"].round(3)
-        st.dataframe(exp_df, use_container_width=True)
+        st.dataframe(exp_df, width="stretch")
         st.bar_chart(exp_df.set_index("feature")["shap_value"])
 
     st.markdown("---")
