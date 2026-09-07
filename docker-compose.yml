@@ -1,0 +1,20 @@
+services:
+  credit-risk-app:
+    build: .
+    container_name: credit_risk_platform
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    volumes:
+      # Dataset and trained model artifacts live on the host — never baked
+      # into the image, and never committed to git (see .gitignore).
+      - ./data:/app/data
+      - ./models:/app/models
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
