@@ -19,6 +19,20 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+def _downcast_dtypes(df: pd.DataFrame) -> pd.DataFrame:
+    """Shrinks numeric dtypes (float64->float32, int64->smallest safe int)
+    to cut DataFrame memory footprint. Meaningful on a 307k-row x 122-col
+    table on memory-constrained free-tier hosting."""
+    before_mb = df.memory_usage(deep=True).sum() / (1024 * 1024)
+    for col in df.select_dtypes(include=["float64"]).columns:
+        df[col] = pd.to_numeric(df[col], downcast="float")
+    for col in df.select_dtypes(include=["int64"]).columns:
+        df[col] = pd.to_numeric(df[col], downcast="integer")
+    after_mb = df.memory_usage(deep=True).sum() / (1024 * 1024)
+    logger.info("Downcast dtypes: %.1f MB -> %.1f MB", before_mb, after_mb)
+    return df
+
+
 def load_raw_train() -> pd.DataFrame:
     if not RAW_TRAIN_FILE.exists():
         raise FileNotFoundError(
@@ -27,6 +41,7 @@ def load_raw_train() -> pd.DataFrame:
         )
     logger.info("Loading raw training data from %s", RAW_TRAIN_FILE)
     df = pd.read_csv(RAW_TRAIN_FILE)
+    df = _downcast_dtypes(df)
     logger.info("Loaded %d rows, %d columns", *df.shape)
     return df
 
@@ -52,7 +67,11 @@ def build_sqlite_db(df: pd.DataFrame | None = None, table_name: str = "applicati
 
     conn = sqlite3.connect(SQLITE_DB_PATH)
     try:
-        df.to_sql(table_name, conn, if_exists="replace", index=False)
+        # chunksize bounds peak memory during the write instead of building
+        # the full 307k-row insert payload in memory at once. (No `method=
+        # "multi"` here — with 122 columns that would blow past SQLite's
+        # 999-variable-per-statement limit at any usable chunk size.)
+        df.to_sql(table_name, conn, if_exists="replace", index=False, chunksize=5000)
         # A couple of read-friendly derived columns/views for the chatbot
         conn.execute(f"""
             CREATE VIEW IF NOT EXISTS applications_readable AS
